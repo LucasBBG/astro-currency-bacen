@@ -9,7 +9,8 @@ import logging
 from datetime import datetime
 from io import StringIO
 
-dag = DAG(
+#Defining DAG
+dag_bacen = DAG(
     'daily_currency_bacen',
     schedule_interval = '@daily',
     default_args={
@@ -21,9 +22,8 @@ dag = DAG(
     tags=["bacen"]
 )
 
-
-def create_table():
-    sql_create_table_ddl = """
+#Creating table
+create_table_sql = """
     CREATE TABLE IF NOT EXISTS daily_currency_bacen (
         data_fechamento DATE,
         cod VARCHAR(10),
@@ -35,13 +35,17 @@ def create_table():
         paridade_venda REAL,
         processed_at TIMESTAMP,
         constraint pk_daily_currency_bacen primary key (data_fechamento, cod)
-
     );
-    """
-    hook = PostgresHook(postgres_conn_id="postgres_default")
-    hook.run(sql)
+"""
 
+create_table_task = PostgresOperator(
+    task_id='create_table_postgres_task',
+    postgres_conn_id='postgres_astro',
+    sql=create_table_sql,
+    dag=dag_bacen
+)
 
+#Extracting data
 def extract(**kwargs):
     ds_nodash = kwargs["ds_nodash"] #data (sem a barra = nodash) de execução da pipeline (agendamento do dia 1, dia 2, ... mesmo que execute o script hoje) 
     base_url = "https://www4.bcb.gov.br/Download/fechamento/"
@@ -60,10 +64,10 @@ extract_task = PythonOperator(
     task_id='extract_task',
     python_callable=extract,
     provide_context=True,
-    dag=dag
+    dag=dag_bacen
 )
 
-
+#Transforming data
 def transform(**kwargs):
     currency_data = kwargs["ti"].xcom_pull(task_ids="extract_task")
     columns = [
@@ -106,7 +110,21 @@ transform_task = PythonOperator(
     task_id='transform_task',
     python_callable=transform,
     provide_context=True,
-    dag=dag
+    dag=dag_bacen
 )
 
 
+#Loading data
+def load(**kwargs):
+    currency_data = kwargs["ti"].xcom_pull(task_ids="transform_task")
+    if currency_data is not None:
+        hook = PostgresHook(postgres_conn_id='postgres_astro', schema='astro')
+        rows = list(currency_data.itertuples(index=False, name=None))
+        hook.insert_rows(
+            table="daily_currency_bacen",
+            rows=rows,
+            replace=True,
+            replace_index=['data_fechamento', 'cod'],
+            target_fields=['data_fechamento', 'cod', 'tipo', 'desc_moeda', 'taxa_compra', 'taxa_venda', 'paridade_compra', 'paridade_venda', 'processed_at']
+        )
+        
