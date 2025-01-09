@@ -23,8 +23,6 @@ dag = DAG(
     tags=["bcb"]
 )
 
-### Extract ###
-
 def extract(**kwargs):
     ds_nodash = kwargs["ds_nodash"] #data (sem a barra = nodash) de execução da pipeline (agendamento do dia 1, dia 2, ... mesmo que execute o script hoje) 
     base_url = "https://www4.bcb.gov.br/Download/fechamento/"
@@ -38,3 +36,51 @@ def extract(**kwargs):
             return csv_data
     except Exception as e:
         logging.error(f"Erro ao extrair dados: {e}")
+
+extract_task = PythonOperator(
+    task_id='extract_task',
+    python_callable=extract,
+    provide_context=True,
+    dag=dag
+)
+
+def transform(**kwargs):
+    currency_data = kwargs["ti"].xcom_pull(task_ids="extract_task")
+
+    columns = [
+        "data_fechamento",
+        "cod",
+        "tipo",
+        "desc_moeda",
+        "taxa_compra",
+        "taxa_venda",
+        "paridade_compra",
+        "paridade_venda"
+    ]
+
+    columns_types = {
+        "data_fechamento": str,
+        "cod": str,
+        "tipo": str,
+        "desc_moeda": str,
+        "taxa_compra": float,
+        "taxa_venda": float,
+        "paridade_compra": float,
+        "paridade_venda": float
+    }
+    
+    parse_date = ["data_fechamento"]
+    
+    if currency_data:
+        df = pd.read_csv(
+            StringIO(currency_data),
+            sep=";",
+            decimal=",",
+            thousands=".",
+            encoding="utf-8",
+            header=None,
+            names=columns,
+            dtype=columns_types,
+            parse_dates=parse_date
+        )
+        return df
