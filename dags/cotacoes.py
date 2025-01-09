@@ -83,4 +83,6 @@ def transform(**kwargs):
             dtype=columns_types,
             parse_dates=parse_date
         )
+        df['processed_at'] = datetime.now()
         return df
+
