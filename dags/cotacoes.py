@@ -22,3 +22,19 @@ dag = DAG(
     },
     tags=["bcb"]
 )
+
+### Extract ###
+
+def extract(**kwargs):
+    ds_nodash = kwargs["ds_nodash"] #data (sem a barra = nodash) de execução da pipeline (agendamento do dia 1, dia 2, ... mesmo que execute o script hoje) 
+    base_url = "https://www4.bcb.gov.br/Download/fechamento/"
+    full_url = f"{base_url}{ds_nodash}.csv"
+    logging.warning(f"URL: {full_url}")
+
+    try:
+        response = requests.get(full_url)
+        if response.status_code == 200:
+            csv_data = response.content.decode("utf-8")
+            return csv_data
+    except Exception as e:
+        logging.error(f"Erro ao extrair dados: {e}")
