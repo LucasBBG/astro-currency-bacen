@@ -123,8 +123,16 @@ def load(**kwargs):
         hook.insert_rows(
             table="daily_currency_bacen",
             rows=rows,
-            replace=True,
-            replace_index=['data_fechamento', 'cod'],
-            target_fields=['data_fechamento', 'cod', 'tipo', 'desc_moeda', 'taxa_compra', 'taxa_venda', 'paridade_compra', 'paridade_venda', 'processed_at']
+            replace=True, #determina que faremos upsert (update/insert)
+            replace_index=['data_fechamento', 'cod'], #determina que faremos upsert (update/insert)
+            target_fields=['data_fechamento', 'cod', 'tipo', 'desc_moeda', 'taxa_compra', 'taxa_venda', 'paridade_compra', 'paridade_venda', 'processed_at'] #determina que faremos upsert (update/insert)
         )
         
+load_task = PythonOperator(
+    task_id='load_task',
+    python_callable=load,
+    provide_context=True,
+    dag=dag_bacen
+)
+
+extract_task >> transform_task >> create_table_task >> load_task
