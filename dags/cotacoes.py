@@ -1,6 +1,4 @@
-from datetime import datetime
 from airflow import DAG
-
 from airflow.operators.python_operator import PythonOperator
 from airflow.providers.postgres.operators.postgres import PostgresOperator #operador para criar a tabela no postgres
 from airflow.providers.postgres.hooks.postgres import PostgresHook #operador para fazer o UPSERT (Update/Insert) no postgres
@@ -8,11 +6,11 @@ from airflow.providers.postgres.hooks.postgres import PostgresHook #operador par
 import pandas as pd #se for um volume grande de dados não usar pandas, usar pyspark
 import requests
 import logging
-
+from datetime import datetime
 from io import StringIO
 
 dag = DAG(
-    'fin_cotacoes_bcb_classic',
+    'daily_currency_bacen',
     schedule_interval = '@daily',
     default_args={
         'owner': 'airflow',
@@ -20,8 +18,29 @@ dag = DAG(
         'start_date': datetime(2024, 1, 1),
         'catchup': False, #se tiver true vai fazer o processo para todos os dias da data de inicio ate hoje
     },
-    tags=["bcb"]
+    tags=["bacen"]
 )
+
+
+def create_table():
+    sql_create_table_ddl = """
+    CREATE TABLE IF NOT EXISTS daily_currency_bacen (
+        data_fechamento DATE,
+        cod VARCHAR(10),
+        tipo VARCHAR(10),
+        desc_moeda VARCHAR(100),
+        taxa_compra NUMERIC(10, 2),
+        taxa_venda NUMERIC(10, 2),
+        paridade_compra REAL,
+        paridade_venda REAL,
+        processed_at TIMESTAMP,
+        constraint pk_daily_currency_bacen primary key (data_fechamento, cod)
+
+    );
+    """
+    hook = PostgresHook(postgres_conn_id="postgres_default")
+    hook.run(sql)
+
 
 def extract(**kwargs):
     ds_nodash = kwargs["ds_nodash"] #data (sem a barra = nodash) de execução da pipeline (agendamento do dia 1, dia 2, ... mesmo que execute o script hoje) 
@@ -44,9 +63,9 @@ extract_task = PythonOperator(
     dag=dag
 )
 
+
 def transform(**kwargs):
     currency_data = kwargs["ti"].xcom_pull(task_ids="extract_task")
-
     columns = [
         "data_fechamento",
         "cod",
@@ -57,7 +76,6 @@ def transform(**kwargs):
         "paridade_compra",
         "paridade_venda"
     ]
-
     columns_types = {
         "data_fechamento": str,
         "cod": str,
@@ -68,9 +86,7 @@ def transform(**kwargs):
         "paridade_compra": float,
         "paridade_venda": float
     }
-    
     parse_date = ["data_fechamento"]
-    
     if currency_data:
         df = pd.read_csv(
             StringIO(currency_data),
@@ -85,4 +101,12 @@ def transform(**kwargs):
         )
         df['processed_at'] = datetime.now()
         return df
+    
+transform_task = PythonOperator(
+    task_id='transform_task',
+    python_callable=transform,
+    provide_context=True,
+    dag=dag
+)
+
 
